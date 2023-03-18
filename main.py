@@ -152,7 +152,7 @@ if __name__ == '__main__':
     # TODO: find max_len from longest query in train_data
     # Variables (can be tweaked)
     max_len = 81  # Int describing the maximum query length, probably used for efficiency
-    batch_size = None  # Int describing the amount of samples per batch (used by the Dataloader)
+    batch_size = 5  # Int describing the amount of samples per batch (used by the Dataloader)
     epochs = 5  # Int describing the amount of training iterations for BERT model
 
     # Load the dataset
