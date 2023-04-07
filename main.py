@@ -2,14 +2,10 @@ import torch
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, Dataset
-from transformers import BertTokenizer, BertForSequenceClassification, AdamW, get_linear_schedule_with_warmup
+from torch.optim import AdamW
+from transformers import BertTokenizer, BertForSequenceClassification, get_linear_schedule_with_warmup
+import matplotlib.pyplot as plt
 
-# Load the dataset
-df = pd.read_csv("lib/ChildrenQueries.csv")
-train_data, test_data = train_test_split(df, test_size=0.2, random_state=42)
-
-train_data.head()
-exit(0)
 
 # Define a custom dataset for BERT input
 class QueryDataset(Dataset):
@@ -48,7 +44,7 @@ class QueryDataset(Dataset):
 # Define the BERT fine-tuning function
 def fine_tune_BERT(data, tokenizer, max_len, batch_size, epochs):
     # Load the dataset
-    train_data = QueryDataset(data["query"], data["target"], tokenizer, max_len)
+    train_data = QueryDataset(data["query"], data["isChild"], tokenizer, max_len)
     train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
 
     # Load the pre-trained BERT model and add a classification layer
@@ -66,6 +62,9 @@ def fine_tune_BERT(data, tokenizer, max_len, batch_size, epochs):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
     model.train()
+
+    train_losses = []
+    train_accs = []
 
     for epoch in range(epochs):
         print(f"Epoch {epoch + 1}/{epochs}")
@@ -98,4 +97,75 @@ def fine_tune_BERT(data, tokenizer, max_len, batch_size, epochs):
         epoch_loss /= len(train_loader)
         epoch_acc /= len(train_data)
 
+        train_losses.append(epoch_loss)
+        train_accs.append(epoch_acc)
+
         print(f"Train loss: {epoch_loss:.2f} | Train accuracy: {epoch_acc:.2f}")
+    return model, (train_losses, train_accs)
+
+
+def test_BERT(model, data, tokenizer, max_len, batch_size):
+    # Evaluate the model on the test set
+    test_data = QueryDataset(data["query"], data["isChild"], tokenizer, max_len)
+    test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=True)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+    model.eval()
+
+    test_loss = 0
+    test_acc = 0
+
+    with torch.no_grad():
+        for batch in test_loader:
+            input_ids = batch['input_ids'].to(device)
+            attention_mask = batch['attention_mask'].to(device)
+            targets = batch['targets'].to(device)
+
+            outputs = model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                labels=targets
+            )
+            loss = outputs.loss
+            logits = outputs.logits
+            preds = torch.argmax(logits, dim=1)
+
+            test_loss += loss.item()
+            test_acc += torch.sum(preds == targets)
+
+    test_loss /= len(test_loader)
+    test_acc /= len(test_data)
+
+    print(f"Test loss: {test_loss:.2f} | Test accuracy: {test_acc:.2f}")
+
+    return model, (test_loss, test_acc)
+
+
+def plot_results(results, labels=[]):
+    plt.plot(results, label=labels)
+    plt.show()
+
+
+if __name__ == '__main__':
+    # TODO: tweak parameters batch_size and epochs
+    # TODO: find max_len from longest query in train_data
+    # Variables (can be tweaked)
+    max_len = 81  # Int describing the maximum query length, probably used for efficiency
+    batch_size = 5  # Int describing the amount of samples per batch (used by the Dataloader)
+    epochs = 5  # Int describing the amount of training iterations for BERT model
+
+    # Load the dataset
+    df = pd.read_csv('ChildrenQueries.csv', delimiter='\t', header=None, names=(['query', 'isChild']))
+
+    train_data, test_data = train_test_split(df, test_size=0.2, random_state=42)
+    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+
+    model, train_results = fine_tune_BERT(data=train_data, tokenizer=tokenizer, max_len=max_len, batch_size=batch_size,
+                                          epochs=epochs)
+
+    plot_results(train_results, ["train_losses", "train_accuracies"])
+    model, test_results = test_BERT(model=model, data=test_data, tokenizer=tokenizer, max_len=max_len,
+                                    batch_size=batch_size)
+
+    plot_results(train_results, ["test_losses", "test_accuracies"])
